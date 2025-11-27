@@ -1,7 +1,7 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session
-
+from typing import List
 from database import get_session
 from models import ScrapeRequest, ScrapeStatusResponse, Channel, AnalyticsResponse
 from repository import TelegramRepository

@@ -1,7 +1,8 @@
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Optional, List
 from sqlmodel import SQLModel, Field
 from sqlalchemy import BigInteger, UniqueConstraint
+
 
 # --- DATABASE MODELS ---
 
@@ -30,7 +31,7 @@ class ChannelStatsDaily(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     channel_id: int = Field(sa_type=BigInteger, nullable=False)
-    date: date = Field(nullable=False)
+    message_date: date = Field(nullable=False)
     post_count: int = Field(default=0)
     total_views: int = Field(default=0)
 
