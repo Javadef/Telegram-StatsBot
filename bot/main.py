@@ -1,79 +1,89 @@
-from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlmodel import Session
-from typing import List
-from database import get_session
-from models import ScrapeRequest, ScrapeStatusResponse, Channel, AnalyticsResponse
-from repository import TelegramRepository
-from service import TelegramService, SCRAPE_STATUS
+import os
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from dotenv import load_dotenv
+from pyrogram import Client
+from typing import Optional # Added Optional type hint
 
-router = APIRouter()
+from database import create_db_and_tables
+from api import router 
 
-# Dependency to get Service (needs Pyrogram client from main, so we defer creation or use singleton)
-# To handle the dependency cleanly, we'll accept the service instance in the route if possible, 
-# or instantiate it using the global client.
-def get_repository(session: Session = Depends(get_session)):
-    return TelegramRepository(session)
+# Load environment variables from .env file
+load_dotenv()
 
-# We will inject the TelegramService from main.py
-def get_telegram_service():
-    from main import pyrogram_client 
-    return TelegramService(pyrogram_client)
+# --- CONFIG & SETUP ---
 
-@router.post("/api/scrape_channel", response_model=ScrapeStatusResponse)
-async def start_scrape(
-    request: ScrapeRequest,
-    background_tasks: BackgroundTasks,
-    service: TelegramService = Depends(get_telegram_service)
-):
+# Setup Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Environment variable retrieval with safe defaults
+try:
+    API_ID = int(os.getenv('API_ID'))
+    API_HASH = os.getenv('API_HASH')
+    BOT_TOKEN = os.getenv('BOT_TOKEN')
+except (TypeError, ValueError):
+    logger.error("FATAL: API_ID, API_HASH, or BOT_TOKEN is missing or invalid in the .env file.")
+    # Raise exception to halt execution if critical credentials are missing
+    raise
+
+# --- CLIENT ---
+# Global Pyrogram client instance: Initialize as None. 
+# It MUST be instantiated inside the lifespan function to run in the main event loop.
+pyrogram_client: Optional[Client] = None
+
+# --- LIFECYCLE HANDLER ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
-    Start a scraping task in the background.
+    Handles startup (database init, Pyrogram start) and shutdown (Pyrogram stop) events.
     """
-    # Initialize status
-    service._update_status(request.channel_identifier, status="pending")
+    global pyrogram_client
     
-    # Default end_date to today if not provided
-    end_dt = request.end_date if request.end_date else date.today()
+    # 1. Startup tasks
+    logger.info("Initializing Database and Tables...")
+    create_db_and_tables()
     
-    # Add to background tasks
-    background_tasks.add_task(
-        service.scrape_channel_task,
-        request.channel_identifier,
-        request.start_date,
-        end_dt
+    # FIX: Instantiate the Pyrogram Client inside the lifespan to ensure it runs in the main event loop thread.
+    pyrogram_client = Client(
+        "telegram_scraper_session",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        bot_token=BOT_TOKEN if BOT_TOKEN else None,
+        in_memory=True
     )
     
-    return {
-        "channel_identifier": request.channel_identifier,
-        "status": "pending",
-        "messages_processed": 0
-    }
+    logger.info("Starting Pyrogram Client...")
+    try:
+        # Pyrogram client MUST be started before any service logic is called
+        await pyrogram_client.start()
+        logger.info("Pyrogram Client started successfully.")
+    except Exception as e:
+        logger.error(f"Failed to start Pyrogram Client. Check API_ID/API_HASH/BOT_TOKEN: {e}")
+        # Re-raise to prevent the server from starting with a broken client
+        raise
+    
+    # Yield control back to FastAPI to start accepting requests
+    yield
+    
+    # 2. Shutdown tasks run after the server shuts down
+    logger.info("Stopping Pyrogram Client...")
+    if pyrogram_client:
+        try:
+            await pyrogram_client.stop()
+        except Exception as e:
+            logger.warning(f"Error while stopping Pyrogram client: {e}")
 
-@router.get("/api/scrape_status", response_model=List[ScrapeStatusResponse])
-async def get_scrape_status():
-    """
-    Returns the live status of all tracked scraping tasks.
-    """
-    results = []
-    for identifier, data in SCRAPE_STATUS.items():
-        results.append({
-            "channel_identifier": identifier,
-            "status": data.get("status"),
-            "messages_processed": data.get("messages_processed", 0),
-            "current_message_date": data.get("current_message_date"),
-            "error": data.get("error")
-        })
-    return results
+# --- APP ---
+app = FastAPI(title="Telegram Scraper Service", version="3.0.0", lifespan=lifespan)
 
-@router.get("/api/channels", response_model=List[Channel])
-def list_channels(repo: TelegramRepository = Depends(get_repository)):
-    return repo.get_all_channels()
+# Register API Routes from api.py
+app.include_router(router)
 
-@router.get("/api/analytics", response_model=AnalyticsResponse)
-def get_analytics(
-    channel_id: int, 
-    start_date: date, 
-    end_date: date,
-    repo: TelegramRepository = Depends(get_repository)
-):
-    return repo.get_analytics(channel_id, start_date, end_date)
+if __name__ == "__main__":
+    # Import uvicorn only if running this file directly
+    import uvicorn
+    logger.info("Starting Uvicorn Server on http://0.0.0.0:8000")
+    # This command keeps the server running until manually stopped
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

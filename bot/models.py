@@ -1,8 +1,7 @@
 from datetime import date, datetime
 from typing import Optional, List
 from sqlmodel import SQLModel, Field
-from sqlalchemy import BigInteger, UniqueConstraint
-
+from sqlalchemy import BigInteger, UniqueConstraint, Date
 
 # --- DATABASE MODELS ---
 
@@ -27,11 +26,14 @@ class Message(SQLModel, table=True):
 
 class ChannelStatsDaily(SQLModel, table=True):
     __tablename__ = "channel_stats_daily"
-    __table_args__ = (UniqueConstraint("channel_id", "date"),)
+    # Updated constraint to use 'message_date'
+    __table_args__ = (UniqueConstraint("channel_id", "message_date"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # FIX: Use sa_type=BigInteger instead of sa_column=Column(BigInteger)
     channel_id: int = Field(sa_type=BigInteger, nullable=False)
-    message_date: date = Field(nullable=False)
+    # FIX: Use sa_type=Date and rename field to message_date
+    message_date: date = Field(sa_type=Date, nullable=False)
     post_count: int = Field(default=0)
     total_views: int = Field(default=0)
 
