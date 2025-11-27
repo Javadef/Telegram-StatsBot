@@ -1,6 +1,6 @@
 import type { AvatarProps } from '@nuxt/ui'
 
-export type UserStatus = 'subscribed' | 'unsubscribed' | 'bounced'
+export type ChannelStatus = 'active' | 'inactive' | 'banned' | 'restricted'
 export type SaleStatus = 'paid' | 'failed' | 'refunded'
 
 export interface User {
@@ -10,6 +10,20 @@ export interface User {
   avatar?: AvatarProps
   status: UserStatus
   location: string
+}
+
+export interface TelegramChannel {
+  id: number
+  name: string
+  username: string
+  link: string
+  avatar: {
+    src: string
+  }
+  subscribers: number
+  totalPosts: number
+  totalViews: number
+  status: ChannelStatus
 }
 
 export interface Mail {

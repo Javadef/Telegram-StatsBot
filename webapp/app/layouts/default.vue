@@ -22,9 +22,9 @@ const links = [[{
     open.value = false
   }
 }, {
-  label: 'Customers',
+  label: 'Channels',
   icon: 'i-lucide-users',
-  to: '/customers',
+  to: '/channels',
   onSelect: () => {
     open.value = false
   }

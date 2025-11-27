@@ -3,7 +3,9 @@ import type { TableColumn } from '@nuxt/ui'
 import { upperFirst } from 'scule'
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
-import type { User } from '~/types'
+
+// Assuming TelegramChannel is imported from your types file, matching the server code
+import type { TelegramChannel } from '~/types'
 
 const UAvatar = resolveComponent('UAvatar')
 const UButton = resolveComponent('UButton')
@@ -14,63 +16,69 @@ const UCheckbox = resolveComponent('UCheckbox')
 const toast = useToast()
 const table = useTemplateRef('table')
 
+// 1. Update filter to use a relevant field, e.g., 'username'
 const columnFilters = ref([{
-  id: 'email',
+  id: 'username',
   value: ''
 }])
 const columnVisibility = ref()
 const rowSelection = ref({ 1: true })
 
-const { data, status } = await useFetch<User[]>('/api/customers', {
+// 2. Update data fetch to use the new API endpoint and type
+const { data, status } = await useFetch<TelegramChannel[]>('/api/channels', {
   lazy: true
 })
 
-function getRowItems(row: Row<User>) {
+function getRowItems(row: Row<TelegramChannel>) {
   return [
     {
       type: 'label',
       label: 'Actions'
     },
     {
-      label: 'Copy customer ID',
+      label: 'Copy Channel ID',
       icon: 'i-lucide-copy',
       onSelect() {
         navigator.clipboard.writeText(row.original.id.toString())
         toast.add({
           title: 'Copied to clipboard',
-          description: 'Customer ID copied to clipboard'
+          description: 'Channel ID copied to clipboard'
         })
+      }
+    },
+    {
+      label: 'Open Channel Link',
+      icon: 'i-lucide-external-link',
+      onSelect() {
+        window.open(row.original.link, '_blank')
       }
     },
     {
       type: 'separator'
     },
     {
-      label: 'View customer details',
-      icon: 'i-lucide-list'
-    },
-    {
-      label: 'View customer payments',
-      icon: 'i-lucide-wallet'
+      label: 'View channel stats',
+      icon: 'i-lucide-bar-chart-2'
     },
     {
       type: 'separator'
     },
     {
-      label: 'Delete customer',
-      icon: 'i-lucide-trash',
-      color: 'error',
+      label: 'Archive channel',
+      icon: 'i-lucide-archive',
+      color: 'warning',
       onSelect() {
         toast.add({
-          title: 'Customer deleted',
-          description: 'The customer has been deleted.'
+          title: 'Channel archived',
+          description: 'The channel has been archived.'
         })
       }
     }
   ]
 }
 
-const columns: TableColumn<User>[] = [
+// 3. Update columns for TelegramChannel properties
+const columns: TableColumn<TelegramChannel>[] = [
   {
     id: 'select',
     header: ({ table }) =>
@@ -94,8 +102,13 @@ const columns: TableColumn<User>[] = [
     header: 'ID'
   },
   {
+  accessorKey: 'username',
+  header: 'Username',
+  enableHiding: true 
+  },
+  {
     accessorKey: 'name',
-    header: 'Name',
+    header: 'Channel',
     cell: ({ row }) => {
       return h('div', { class: 'flex items-center gap-3' }, [
         h(UAvatar, {
@@ -104,20 +117,21 @@ const columns: TableColumn<User>[] = [
         }),
         h('div', undefined, [
           h('p', { class: 'font-medium text-highlighted' }, row.original.name),
-          h('p', { class: '' }, `@${row.original.name}`)
+          // Using username property from channel data
+          h('p', { class: '' }, `@${row.original.username}`)
         ])
       ])
     }
   },
   {
-    accessorKey: 'email',
+    accessorKey: 'subscribers',
     header: ({ column }) => {
       const isSorted = column.getIsSorted()
 
       return h(UButton, {
         color: 'neutral',
         variant: 'ghost',
-        label: 'Email',
+        label: 'Subscribers',
         icon: isSorted
           ? isSorted === 'asc'
             ? 'i-lucide-arrow-up-narrow-wide'
@@ -126,22 +140,30 @@ const columns: TableColumn<User>[] = [
         class: '-mx-2.5',
         onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
       })
-    }
+    },
+    cell: ({ row }) => row.original.subscribers.toLocaleString()
   },
   {
-    accessorKey: 'location',
-    header: 'Location',
-    cell: ({ row }) => row.original.location
+    accessorKey: 'totalPosts',
+    header: 'Total Posts',
+    cell: ({ row }) => row.original.totalPosts.toLocaleString()
+  },
+  {
+    accessorKey: 'totalViews',
+    header: 'Total Views',
+    cell: ({ row }) => row.original.totalViews.toLocaleString()
   },
   {
     accessorKey: 'status',
     header: 'Status',
     filterFn: 'equals',
     cell: ({ row }) => {
+      // Adjusting badge colors for TelegramChannel status values
       const color = {
-        subscribed: 'success' as const,
-        unsubscribed: 'error' as const,
-        bounced: 'warning' as const
+        active: 'success' as const,
+        inactive: 'warning' as const,
+        restricted: 'amber' as const,
+        banned: 'error' as const
       }[row.original.status]
 
       return h(UBadge, { class: 'capitalize', variant: 'subtle', color }, () =>
@@ -178,6 +200,7 @@ const columns: TableColumn<User>[] = [
 
 const statusFilter = ref('all')
 
+// Watcher now targets the 'status' column filter
 watch(() => statusFilter.value, (newVal) => {
   if (!table?.value?.tableApi) return
 
@@ -191,12 +214,13 @@ watch(() => statusFilter.value, (newVal) => {
   }
 })
 
-const email = computed({
+// Computed property for the search input, now targeting 'username'
+const username = computed({
   get: (): string => {
-    return (table.value?.tableApi?.getColumn('email')?.getFilterValue() as string) || ''
+    return (table.value?.tableApi?.getColumn('username')?.getFilterValue() as string) || ''
   },
   set: (value: string) => {
-    table.value?.tableApi?.getColumn('email')?.setFilterValue(value || undefined)
+    table.value?.tableApi?.getColumn('username')?.setFilterValue(value || undefined)
   }
 })
 
@@ -207,15 +231,15 @@ const pagination = ref({
 </script>
 
 <template>
-  <UDashboardPanel id="customers">
+  <UDashboardPanel id="channels">
     <template #header>
-      <UDashboardNavbar title="Customers">
+      <UDashboardNavbar title="Telegram Channels">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
 
         <template #right>
-          <CustomersAddModal />
+          <ChannelsAddModal />
         </template>
       </UDashboardNavbar>
     </template>
@@ -223,14 +247,14 @@ const pagination = ref({
     <template #body>
       <div class="flex flex-wrap items-center justify-between gap-1.5">
         <UInput
-          v-model="email"
+          v-model="username"
           class="max-w-sm"
           icon="i-lucide-search"
-          placeholder="Filter emails..."
+          placeholder="Filter by username..."
         />
 
         <div class="flex flex-wrap items-center gap-1.5">
-          <CustomersDeleteModal :count="table?.tableApi?.getFilteredSelectedRowModel().rows.length">
+          <ChannelsDeleteModal :count="table?.tableApi?.getFilteredSelectedRowModel().rows.length">
             <UButton
               v-if="table?.tableApi?.getFilteredSelectedRowModel().rows.length"
               label="Delete"
@@ -244,15 +268,17 @@ const pagination = ref({
                 </UKbd>
               </template>
             </UButton>
-          </CustomersDeleteModal>
+          </ChannelsDeleteModal>
 
           <USelect
             v-model="statusFilter"
             :items="[
               { label: 'All', value: 'all' },
-              { label: 'Subscribed', value: 'subscribed' },
-              { label: 'Unsubscribed', value: 'unsubscribed' },
-              { label: 'Bounced', value: 'bounced' }
+              // Updated filter options to match channel statuses
+              { label: 'Active', value: 'active' },
+              { label: 'Inactive', value: 'inactive' },
+              { label: 'Restricted', value: 'restricted' },
+              { label: 'Banned', value: 'banned' }
             ]"
             :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200' }"
             placeholder="Filter status"
@@ -315,7 +341,6 @@ const pagination = ref({
           {{ table?.tableApi?.getFilteredSelectedRowModel().rows.length || 0 }} of
           {{ table?.tableApi?.getFilteredRowModel().rows.length || 0 }} row(s) selected.
         </div>
-
         <div class="flex items-center gap-1.5">
           <UPagination
             :default-page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
