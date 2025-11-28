@@ -55,8 +55,8 @@ async def lifespan(app: FastAPI):
         "telegram_scraper_session",
         api_id=API_ID,
         api_hash=API_HASH,
-  #      bot_token=BOT_TOKEN if BOT_TOKEN else None,
-        in_memory=True
+    #   bot_token=BOT_TOKEN if BOT_TOKEN else None,
+    #   in_memory=True
     )
 
 
