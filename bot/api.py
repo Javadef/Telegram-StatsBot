@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session
@@ -6,29 +7,50 @@ from database import get_session
 from models import ScrapeRequest, ScrapeStatusResponse, Channel, AnalyticsResponse
 from repository import TelegramRepository
 from service import TelegramService, SCRAPE_STATUS
+import telegram_client 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Dependency to get Service (needs Pyrogram client from main, so we defer creation or use singleton)
-# To handle the dependency cleanly, we'll accept the service instance in the route if possible, 
-# or instantiate it using the global client.
+# Dependency to get Repository
 def get_repository(session: Session = Depends(get_session)):
     return TelegramRepository(session)
 
-# We will inject the TelegramService from main.py
+# Dependency to get Service - MUST ENSURE CLIENT IS CONNECTED
 def get_telegram_service():
-    from main import pyrogram_client 
-    return TelegramService(pyrogram_client)
+    # Check the variable directly on the imported module
+    client_instance = telegram_client.pyrogram_client 
+    
+    # Check if the client is None 
+    if client_instance is None:
+        logger.error("Pyrogram client is None. Client initialization failed in main.")
+        raise HTTPException(
+            status_code=503, 
+            detail="Scraper service is unavailable. Telegram client is not initialized."
+        )
+
+    # Use is_connected on the retrieved instance
+    if not client_instance.is_connected:
+        logger.error("Pyrogram client is not connected. Cannot create TelegramService.")
+        raise HTTPException(
+            status_code=503, 
+            detail="Scraper service is unavailable. Telegram client not connected to Telegram servers."
+        )
+        
+    return TelegramService(client_instance)
 
 @router.post("/api/scrape_channel", response_model=ScrapeStatusResponse)
 async def start_scrape(
     request: ScrapeRequest,
     background_tasks: BackgroundTasks,
-    service: TelegramService = Depends(get_telegram_service)
+    service: TelegramService = Depends(get_telegram_service) # Client is guaranteed to be connected here
 ):
     """
     Start a scraping task in the background.
     """
+    logger.info(f"Starting background scrape for channel: {request.channel_identifier}")
+    
     # Initialize status
     service._update_status(request.channel_identifier, status="pending")
     

@@ -48,7 +48,7 @@ class TelegramRepository:
             stats = self.session.exec(
                 select(ChannelStatsDaily).where(
                     ChannelStatsDaily.channel_id == channel_id, 
-                    ChannelStatsDaily.date == date_key
+                    ChannelStatsDaily.message_date == date_key  # <-- FIXED
                 )
             ).first()
 
@@ -58,12 +58,13 @@ class TelegramRepository:
             else:
                 stats = ChannelStatsDaily(
                     channel_id=channel_id, 
-                    date=date_key, 
+                    message_date=date_key,          # <-- FIXED
                     post_count=metrics['posts'], 
                     total_views=metrics['views']
                 )
             self.session.add(stats)
         self.session.commit()
+
 
     def get_last_scraped_id(self, channel_id: int) -> Optional[int]:
         run = self.session.exec(select(ScrapeRun).where(ScrapeRun.channel_id == channel_id)).first()
