@@ -48,7 +48,7 @@ class Channel(SQLModel, table=True):
     photo_file_id: Optional[str] = Field(default=None)    # NEW: profile pic Telegram ID
     subscriber_count: Optional[int] = Field(default=0)    # NEW
     type: Optional[str] = Field(default=None)            # public/private
-    linked_chat_id: Optional[int] = Field(default=None)   # linked discussion group
+    linked_chat_id: Optional[int] = Field(default=None, sa_type=BigInteger)   # linked discussion group
     added_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Message(SQLModel, table=True):
@@ -106,4 +106,8 @@ class AnalyticsResponse(SQLModel):
     period_end: date
     total_posts: int
     total_views: int
+    # NEW FIELDS:
+    total_reactions: int 
+    total_replies: int
+    total_forwards: int
     daily_breakdown: List[dict]

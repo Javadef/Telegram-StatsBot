@@ -19,21 +19,25 @@ class TelegramRepository:
 
     # 1. OPTIONAL FIELDS IN UPSERTS
     # ⚠️ FIX: Updated to accept and update all relevant Channel fields.
+    # ⚠️ FIX: Change the signature to accept the ChannelData TypedDict
     def upsert_channel(self, channel_data: ChannelData) -> Channel:
-        # Use a context manager for safe session handling (optional, but good practice)
+        # Use a context manager for safe session handling
         with self.session:
             channel = self.session.exec(
                 select(Channel).where(Channel.channel_id == channel_data['channel_id'])
             ).first()
             
+            # --- The logic to handle all fields is already correct here ---
             if channel:
-                # Update all fields provided in channel_data, excluding 'channel_id'
+                # Update all fields provided in channel_data
                 for key, value in channel_data.items():
                     if key != 'channel_id':
-                        setattr(channel, key, value)
+                        # The key name matches the model field name
+                        setattr(channel, key, value) 
                 self.session.add(channel)
             else:
-                channel = Channel(**channel_data)
+                # Unpack the dictionary to create a new Channel object
+                channel = Channel(**channel_data) 
                 self.session.add(channel)
                 
             self.session.commit()
@@ -105,7 +109,9 @@ class TelegramRepository:
             # Commit all changes for the loop at once (bulk transaction)
             self.session.commit()
 
-
+    def get_channel_by_id(self, pk_id: int) -> Optional[Channel]:
+         return self.session.get(Channel, pk_id)
+    
     def get_last_scraped_id(self, channel_id: int) -> Optional[int]:
         run = self.session.exec(select(ScrapeRun).where(ScrapeRun.channel_id == channel_id)).first()
         return run.last_scraped_id if run else None
@@ -127,26 +133,39 @@ class TelegramRepository:
 
     # 4. Analytics Update (Minimal for now)
     def get_analytics(self, channel_id: int, start_date: date, end_date: date) -> Dict:
-        # NOTE: To fully support the new fields, the query and return structure would need updating
-        # to include 'total_reactions', 'total_replies', etc. in the summary and breakdown.
         query = select(ChannelStatsDaily).where(
             ChannelStatsDaily.channel_id == channel_id,
             ChannelStatsDaily.message_date >= start_date,
             ChannelStatsDaily.message_date <= end_date
         ).order_by(ChannelStatsDaily.message_date)
-        
+
         results = self.session.exec(query).all()
-        
+
         total_posts = sum(r.post_count for r in results)
         total_views = sum(r.total_views for r in results)
-        # total_reactions = sum(r.total_reactions for r in results) # Needs new field in results
-        
+        total_reactions = sum(r.total_reactions for r in results)
+        total_replies = sum(r.total_replies for r in results)
+        total_forwards = sum(r.total_forwards for r in results)
+
         return {
             "channel_id": channel_id,
             "period_start": start_date,
             "period_end": end_date,
             "total_posts": total_posts,
             "total_views": total_views,
-            # Add other totals here...
-            "daily_breakdown": [r.model_dump() for r in results]
+            "total_reactions": total_reactions,
+            "total_replies": total_replies,
+            "total_forwards": total_forwards,
+            "daily_breakdown": [
+                {
+                    "message_date": r.message_date,
+                    "post_count": r.post_count,
+                    "total_views": r.total_views,
+                    "total_reactions": r.total_reactions,
+                    "total_replies": r.total_replies,
+                    "total_forwards": r.total_forwards,
+                }
+                for r in results
+            ]
         }
+

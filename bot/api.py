@@ -87,15 +87,63 @@ async def get_scrape_status():
         })
     return results
 
+@router.get("/api/scrape_status/{channel_identifier}", response_model=ScrapeStatusResponse)
+async def get_scrape_status_by_id(channel_identifier: str):
+    """
+    Returns the live status of a single, specific scraping task.
+    """
+    data = SCRAPE_STATUS.get(channel_identifier)
+    
+    if data is None:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No active or tracked scrape task found for channel: {channel_identifier}"
+        )
+        
+    return {
+        "channel_identifier": channel_identifier,
+        "status": data.get("status"),
+        "messages_processed": data.get("messages_processed", 0),
+        "current_message_date": data.get("current_message_date"),
+        "error": data.get("error")
+    }
+
 @router.get("/api/channels", response_model=List[Channel])
 def list_channels(repo: TelegramRepository = Depends(get_repository)):
     return repo.get_all_channels()
 
+@router.get("/api/channels/{channel_id}", response_model=Optional[Channel])
+def get_channel_details(channel_id: int, repo: TelegramRepository = Depends(get_repository)):
+    """
+    Returns details for a single channel by its internal primary key ID.
+    """
+    channel = repo.get_channel_by_id(channel_id) # Need to implement this method in the Repository
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    return channel
+
 @router.get("/api/analytics", response_model=AnalyticsResponse)
 def get_analytics(
-    channel_id: int, 
-    start_date: date, 
+    channel_id: int,
+    start_date: date,
     end_date: date,
     repo: TelegramRepository = Depends(get_repository)
 ):
-    return repo.get_analytics(channel_id, start_date, end_date)
+    # Fetch analytics data from repository
+    analytics = repo.get_analytics(channel_id, start_date, end_date)
+    
+    if not analytics or not analytics.get("daily_breakdown"):
+        raise HTTPException(status_code=404, detail="No analytics data found for this period")
+    
+    # Map repo result to AnalyticsResponse
+    return AnalyticsResponse(
+        channel_id=analytics["channel_id"],
+        period_start=analytics["period_start"],
+        period_end=analytics["period_end"],
+        total_posts=analytics["total_posts"],
+        total_views=analytics["total_views"],
+        total_reactions=analytics.get("total_reactions", 0),
+        total_replies=analytics.get("total_replies", 0),
+        total_forwards=analytics.get("total_forwards", 0),
+        daily_breakdown=analytics["daily_breakdown"]
+    )

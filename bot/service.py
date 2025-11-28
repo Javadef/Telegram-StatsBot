@@ -8,7 +8,7 @@ from pyrogram.enums import ChatType
 from pyrogram.raw.functions.messages import GetMessageReactionsList
 from pyrogram.raw.functions.stats import GetMessagePublicForwards
 from pyrogram.raw.types import InputPeerChannel, InputChannel
-
+from models import ChannelData, MessageData, DailyMetrics
 from database import get_session
 from repository import TelegramRepository
 
@@ -62,14 +62,19 @@ class TelegramService:
         linked_chat_id = getattr(chat.linked_chat, "id", None)
         channel_id = chat.id
 
-        repo.upsert_channel(
-            channel_id, chat.title, chat.username,
-            description=description,
-            photo_file_id=photo_file_id,
-            subscriber_count=subscriber_count,
-            type=chat_type,
-            linked_chat_id=linked_chat_id
-        )
+        channel_data: ChannelData = {
+            "channel_id": channel_id,
+            "title": chat.title,
+            "username": chat.username,
+            "description": description,
+            "photo_file_id": photo_file_id,
+            "subscriber_count": subscriber_count,
+            "type": chat_type,
+            "linked_chat_id": linked_chat_id
+        }
+
+        repo.upsert_channel(channel_data)
+
 
         last_id = repo.get_last_scraped_id(channel_id)
         self._update_status(channel_identifier, status="running", messages_processed=0)
@@ -121,7 +126,8 @@ class TelegramService:
                         break
 
                 # --- Replies ---
-                replies = getattr(message.replies, "total", 0) or 0
+                replies = getattr(message, "replies", None)
+                replies = getattr(replies, "total", 0) if replies else 0
 
                 # --- Public forwards (paginated for accuracy) ---
                 forwards = 0
@@ -146,8 +152,8 @@ class TelegramService:
                         forwards = 1 if message.forward_from or message.forward_from_chat else 0
                         break
 
-                # --- Buffer message ---
-                messages_buffer.append({
+                # --- Buffer message --- 
+                message_data: MessageData = {
                     "channel_id": channel_id,
                     "message_id": message.id,
                     "date": message.date,
@@ -155,17 +161,27 @@ class TelegramService:
                     "reactions": reactions,
                     "replies": replies,
                     "forwards": forwards
-                })
+                }
+                messages_buffer.append(message_data)
+
 
                 # --- Daily stats ---
                 if msg_date not in stats_buffer:
-                    stats_buffer[msg_date] = {'posts': 0, 'views': 0, 'reactions': 0, 'replies': 0, 'forwards': 0}
+                    stats_buffer[msg_date] = DailyMetrics(
+                        posts=0,
+                        views=0,
+                        reactions=0,
+                        replies=0,
+                        forwards=0
+                    )
 
-                stats_buffer[msg_date]['posts'] += 1
-                stats_buffer[msg_date]['views'] += views
-                stats_buffer[msg_date]['reactions'] += reactions
-                stats_buffer[msg_date]['replies'] += replies
-                stats_buffer[msg_date]['forwards'] += forwards
+                stats = stats_buffer[msg_date]
+                stats['posts'] += 1
+                stats['views'] += views
+                stats['reactions'] += reactions
+                stats['replies'] += replies
+                stats['forwards'] += forwards
+
 
                 processed_count += 1
                 if processed_count % 10 == 0:
@@ -178,10 +194,9 @@ class TelegramService:
                 # --- Commit batches ---
                 if len(messages_buffer) >= BATCH_SIZE:
                     repo.upsert_messages(messages_buffer)
-                    repo.update_daily_stats(channel_id, stats_buffer)
+                   # repo.update_daily_stats(channel_id, stats_buffer)
                     repo.update_scrape_run(channel_id, highest_id_seen)
                     messages_buffer.clear()
-                    stats_buffer.clear()
 
             except FloodWait as e:
                 logger.warning(f"FloodWait detected: sleeping {e.value}s")
@@ -194,7 +209,7 @@ class TelegramService:
         # --- Final commit ---
         if messages_buffer:
             repo.upsert_messages(messages_buffer)
-            repo.update_daily_stats(channel_id, stats_buffer)
+        repo.update_daily_stats(channel_id, stats_buffer)
         repo.update_scrape_run(channel_id, highest_id_seen)
 
         self._update_status(
