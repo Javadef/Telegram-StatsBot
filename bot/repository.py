@@ -88,9 +88,9 @@ class TelegramRepository:
     def get_analytics(self, channel_id: int, start_date: date, end_date: date) -> Dict:
         query = select(ChannelStatsDaily).where(
             ChannelStatsDaily.channel_id == channel_id,
-            ChannelStatsDaily.date >= start_date,
-            ChannelStatsDaily.date <= end_date
-        ).order_by(ChannelStatsDaily.date)
+            ChannelStatsDaily.message_date >= start_date,
+            ChannelStatsDaily.message_date <= end_date
+        ).order_by(ChannelStatsDaily.message_date)
         
         results = self.session.exec(query).all()
         
