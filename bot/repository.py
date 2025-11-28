@@ -8,68 +8,102 @@ from models import ChannelData, MessageData, DailyMetrics
 
 class TelegramRepository:
     def __init__(self, session: Session):
-        self.session = session
+        self.session = session # Session is passed in, management (commit/rollback) is done externally or explicitly
 
-    def upsert_channel(self, channel_id: int, title: str, username: Optional[str]) -> Channel:
-        channel = self.session.exec(select(Channel).where(Channel.channel_id == channel_id)).first()
-        if channel:
-            channel.title = title
-            channel.username = username
-            self.session.add(channel)
-        else:
-            channel = Channel(channel_id=channel_id, title=title, username=username)
-            self.session.add(channel)
-        self.session.commit()
-        self.session.refresh(channel)
-        return channel
+    # --- SESSION HANDLING IMPROVEMENT (Conceptual) ---
+    # The ideal usage would be:
+    # with get_session() as session:
+    #     repo = TelegramRepository(session)
+    #     repo.upsert_channel(...)
+    # For now, we keep commit/refresh inside the methods, but note the self.session management below.
 
-    def upsert_messages(self, messages_data: List[Dict]):
-        if not messages_data:
-            return
-        
-        # In a high-throughput scenario, prefer sqlalchemy.dialects.postgresql.insert for bulk upsert
-        # For this implementation, we check existence to ensure safety with SQLModel
-        for msg in messages_data:
-            existing = self.session.exec(
-                select(Message).where(
-                    Message.channel_id == msg['channel_id'], 
-                    Message.message_id == msg['message_id']
-                )
+    # 1. OPTIONAL FIELDS IN UPSERTS
+    # ⚠️ FIX: Updated to accept and update all relevant Channel fields.
+    def upsert_channel(self, channel_data: ChannelData) -> Channel:
+        # Use a context manager for safe session handling (optional, but good practice)
+        with self.session:
+            channel = self.session.exec(
+                select(Channel).where(Channel.channel_id == channel_data['channel_id'])
             ).first()
             
-            if existing:
-                existing.views = msg['views']
-                existing.reactions = msg['reactions']
-                existing.replies = msg['replies']
-                existing.forwards = msg['forwards']
-                self.session.add(existing)
+            if channel:
+                # Update all fields provided in channel_data, excluding 'channel_id'
+                for key, value in channel_data.items():
+                    if key != 'channel_id':
+                        setattr(channel, key, value)
+                self.session.add(channel)
             else:
-                new_msg = Message(**msg)
-                self.session.add(new_msg)
-        self.session.commit()
+                channel = Channel(**channel_data)
+                self.session.add(channel)
+                
+            self.session.commit()
+            self.session.refresh(channel)
+            return channel
 
+    # 2. BULK UPSERT PERFORMANCE
+    # ⚠️ FIX: Implemented bulk ON CONFLICT DO UPDATE using the PostgreSQL dialect's insert function.
+    def upsert_messages(self, messages_data: List[MessageData]):
+        if not messages_data:
+            return
 
-    def update_daily_stats(self, channel_id: int, stats_buffer: Dict[date, Dict]):
-        for date_key, metrics in stats_buffer.items():
-            stats = self.session.exec(
-                select(ChannelStatsDaily).where(
-                    ChannelStatsDaily.channel_id == channel_id, 
-                    ChannelStatsDaily.message_date == date_key  # <-- FIXED
-                )
-            ).first()
+        # Convert list of TypedDicts to list of dicts for SQLAlchemy
+        data_to_insert = [dict(msg) for msg in messages_data]
 
-            if stats:
-                stats.post_count += metrics['posts']
-                stats.total_views += metrics['views']
-            else:
-                stats = ChannelStatsDaily(
-                    channel_id=channel_id, 
-                    message_date=date_key,          # <-- FIXED
-                    post_count=metrics['posts'], 
-                    total_views=metrics['views']
-                )
-            self.session.add(stats)
-        self.session.commit()
+        # Use the PostgreSQL bulk insert/upsert capability
+        # NOTE: This requires PostgreSQL. For SQLite/MySQL, you'd need different strategies.
+        stmt = insert(Message).values(data_to_insert)
+
+        # Specify which fields to update on conflict
+        # The index_elements are the primary/unique key(s) that define the conflict: ('channel_id', 'message_id')
+        update_cols = {
+            "views": stmt.excluded.views,
+            "reactions": stmt.excluded.reactions,
+            "replies": stmt.excluded.replies,
+            "forwards": stmt.excluded.forwards,
+        }
+
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["channel_id", "message_id"],
+            set_=update_cols
+        )
+        
+        # Execute and commit in a single transaction
+        with self.session:
+            self.session.execute(stmt)
+            self.session.commit()
+
+    # 3. UPDATE DAILY STATS EXTENSIBILITY
+    # ⚠️ FIX: Updated to handle new reaction/reply/forward metrics.
+    def update_daily_stats(self, channel_id: int, stats_buffer: Dict[date, DailyMetrics]):
+        with self.session:
+            for date_key, metrics in stats_buffer.items():
+                stats = self.session.exec(
+                    select(ChannelStatsDaily).where(
+                        ChannelStatsDaily.channel_id == channel_id, 
+                        ChannelStatsDaily.message_date == date_key
+                    )
+                ).first()
+
+                if stats:
+                    stats.post_count += metrics['posts']
+                    stats.total_views += metrics['views']
+                    stats.total_reactions += metrics.get('reactions', 0) # Use .get for robustness
+                    stats.total_replies += metrics.get('replies', 0)     # Use .get for robustness
+                    stats.total_forwards += metrics.get('forwards', 0)   # Use .get for robustness
+                else:
+                    stats = ChannelStatsDaily(
+                        channel_id=channel_id, 
+                        message_date=date_key,
+                        post_count=metrics['posts'], 
+                        total_views=metrics['views'],
+                        total_reactions=metrics.get('reactions', 0),
+                        total_replies=metrics.get('replies', 0),
+                        total_forwards=metrics.get('forwards', 0),
+                    )
+                self.session.add(stats)
+            
+            # Commit all changes for the loop at once (bulk transaction)
+            self.session.commit()
 
 
     def get_last_scraped_id(self, channel_id: int) -> Optional[int]:
@@ -91,7 +125,10 @@ class TelegramRepository:
     def get_all_channels(self) -> List[Channel]:
         return self.session.exec(select(Channel)).all()
 
+    # 4. Analytics Update (Minimal for now)
     def get_analytics(self, channel_id: int, start_date: date, end_date: date) -> Dict:
+        # NOTE: To fully support the new fields, the query and return structure would need updating
+        # to include 'total_reactions', 'total_replies', etc. in the summary and breakdown.
         query = select(ChannelStatsDaily).where(
             ChannelStatsDaily.channel_id == channel_id,
             ChannelStatsDaily.message_date >= start_date,
@@ -102,6 +139,7 @@ class TelegramRepository:
         
         total_posts = sum(r.post_count for r in results)
         total_views = sum(r.total_views for r in results)
+        # total_reactions = sum(r.total_reactions for r in results) # Needs new field in results
         
         return {
             "channel_id": channel_id,
@@ -109,5 +147,6 @@ class TelegramRepository:
             "period_end": end_date,
             "total_posts": total_posts,
             "total_views": total_views,
+            # Add other totals here...
             "daily_breakdown": [r.model_dump() for r in results]
         }
