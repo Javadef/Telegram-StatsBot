@@ -1,8 +1,10 @@
 from typing import List, Optional, Dict
 from datetime import date, datetime
 from sqlmodel import Session, select, col, and_
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func
 from models import Channel, Message, ChannelStatsDaily, ScrapeRun
+from models import ChannelData, MessageData, DailyMetrics 
 
 class TelegramRepository:
     def __init__(self, session: Session):
@@ -37,11 +39,15 @@ class TelegramRepository:
             
             if existing:
                 existing.views = msg['views']
+                existing.reactions = msg['reactions']
+                existing.replies = msg['replies']
+                existing.forwards = msg['forwards']
                 self.session.add(existing)
             else:
                 new_msg = Message(**msg)
                 self.session.add(new_msg)
         self.session.commit()
+
 
     def update_daily_stats(self, channel_id: int, stats_buffer: Dict[date, Dict]):
         for date_key, metrics in stats_buffer.items():

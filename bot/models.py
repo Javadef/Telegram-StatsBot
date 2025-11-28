@@ -1,7 +1,39 @@
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, TypedDict
 from sqlmodel import SQLModel, Field
 from sqlalchemy import BigInteger, UniqueConstraint, Date
+
+# --- TYPING FOR REPOSITORY INPUTS ---
+
+class ChannelData(TypedDict, total=False):
+    """Data dictionary for upserting a Channel."""
+    channel_id: int
+    title: str
+    username: Optional[str]
+    description: Optional[str]
+    photo_file_id: Optional[str]
+    subscriber_count: Optional[int]
+    type: Optional[str]
+    linked_chat_id: Optional[int]
+
+class MessageData(TypedDict):
+    """Data dictionary for bulk upserting Messages."""
+    channel_id: int
+    message_id: int
+    date: datetime
+    views: int
+    reactions: int
+    replies: int
+    forwards: int
+    # Add other fields as needed
+
+class DailyMetrics(TypedDict):
+    """Metrics for a single day."""
+    posts: int
+    views: int
+    reactions: int # EXTENSIBILITY
+    replies: int   # EXTENSIBILITY
+    forwards: int  # EXTENSIBILITY
 
 # --- DATABASE MODELS ---
 
@@ -12,6 +44,11 @@ class Channel(SQLModel, table=True):
     channel_id: int = Field(sa_type=BigInteger, unique=True, nullable=False)
     username: Optional[str] = Field(default=None)
     title: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None)      # NEW
+    photo_file_id: Optional[str] = Field(default=None)    # NEW: profile pic Telegram ID
+    subscriber_count: Optional[int] = Field(default=0)    # NEW
+    type: Optional[str] = Field(default=None)            # public/private
+    linked_chat_id: Optional[int] = Field(default=None)   # linked discussion group
     added_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Message(SQLModel, table=True):
@@ -23,19 +60,23 @@ class Message(SQLModel, table=True):
     message_id: int = Field(sa_type=BigInteger, nullable=False)
     date: datetime = Field(nullable=False)
     views: Optional[int] = Field(default=0)
+    reactions: Optional[int] = Field(default=0)
+    replies: Optional[int] = Field(default=0)
+    forwards: Optional[int] = Field(default=0)
 
+# ⚠️ EXTENSIBILITY FIX: Added reaction, replies, forwards fields to ChannelStatsDaily
 class ChannelStatsDaily(SQLModel, table=True):
     __tablename__ = "channel_stats_daily"
-    # Updated constraint to use 'message_date'
     __table_args__ = (UniqueConstraint("channel_id", "message_date"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    # FIX: Use sa_type=BigInteger instead of sa_column=Column(BigInteger)
     channel_id: int = Field(sa_type=BigInteger, nullable=False)
-    # FIX: Use sa_type=Date and rename field to message_date
     message_date: date = Field(sa_type=Date, nullable=False)
     post_count: int = Field(default=0)
     total_views: int = Field(default=0)
+    total_reactions: int = Field(default=0)
+    total_replies: int = Field(default=0)
+    total_forwards: int = Field(default=0)
 
 class ScrapeRun(SQLModel, table=True):
     __tablename__ = "scrape_runs"
