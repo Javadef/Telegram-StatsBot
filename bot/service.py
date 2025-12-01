@@ -3,19 +3,18 @@ import logging
 from datetime import date
 from typing import Dict
 from pyrogram import Client
-from pyrogram.errors import FloodWait, RPCError
+from pyrogram.errors import FloodWait
 from pyrogram.enums import ChatType
-from pyrogram.raw.functions.messages import GetMessageReactionsList
-from pyrogram.raw.functions.stats import GetMessagePublicForwards
-from pyrogram.raw.types import InputPeerChannel, InputChannel
+
 from models import ChannelData, MessageData, DailyMetrics
 from database import get_session
 from repository import TelegramRepository
 
 logger = logging.getLogger(__name__)
 
-# --- IN-MEMORY SHARED STATE FOR LIVE MONITORING ---
+# --- SHARED LIVE SCRAPE STATE ---
 SCRAPE_STATUS: Dict[str, Dict] = {}
+
 
 class TelegramService:
     def __init__(self, client: Client):
@@ -35,6 +34,7 @@ class TelegramService:
         session_gen = get_session()
         session = next(session_gen)
         repo = TelegramRepository(session)
+
         try:
             await self._scrape_logic(repo, channel_identifier, start_date, end_date)
         except Exception as e:
@@ -46,43 +46,39 @@ class TelegramService:
     async def _scrape_logic(self, repo: TelegramRepository, channel_identifier: str, start_date: date, end_date: date):
         self._update_status(channel_identifier, status="initializing")
 
-        # --- Get chat info ---
+        # --- FETCH CHAT ---
         try:
             chat = await self.client.get_chat(channel_identifier)
         except Exception as e:
-            raise Exception(f"Telegram Error: {e}")
+            raise Exception(f"Telegram error: {e}")
 
         if chat.type not in [ChatType.CHANNEL, ChatType.SUPERGROUP]:
             raise Exception("Target is not a channel or supergroup")
 
-        description = chat.description
-        photo_file_id = chat.photo.big_file_id if chat.photo else None
-        subscriber_count = getattr(chat, "members_count", None)
-        chat_type = chat.type.name
-        linked_chat_id = getattr(chat.linked_chat, "id", None)
         channel_id = chat.id
 
+        # --- UPSERT CHANNEL META ---
         channel_data: ChannelData = {
             "channel_id": channel_id,
             "title": chat.title,
             "username": chat.username,
-            "description": description,
-            "photo_file_id": photo_file_id,
-            "subscriber_count": subscriber_count,
-            "type": chat_type,
-            "linked_chat_id": linked_chat_id
+            "description": chat.description,
+            "photo_file_id": chat.photo.big_file_id if chat.photo else None,
+            "subscriber_count": getattr(chat, "members_count", None),
+            "type": chat.type.name,
+            "linked_chat_id": getattr(chat.linked_chat, "id", None)
         }
 
         repo.upsert_channel(channel_data)
 
-
         last_id = repo.get_last_scraped_id(channel_id)
+        highest_id_seen = last_id or 0
+
         self._update_status(channel_identifier, status="running", messages_processed=0)
 
         messages_buffer = []
-        stats_buffer = {}
+        stats_buffer: Dict[date, DailyMetrics] = {}
         processed_count = 0
-        highest_id_seen = last_id if last_id else 0
         BATCH_SIZE = 50
 
         async for message in self.client.get_chat_history(channel_id):
@@ -91,68 +87,37 @@ class TelegramService:
                     continue
 
                 msg_date = message.date.date()
+
+                # --- DATE BOUNDARY CONTROL ---
                 if msg_date > end_date:
                     continue
+
                 if msg_date < start_date:
                     break
-                if last_id and message.id <= last_id:
-                    break
 
+                # --- TRACK NEWEST MESSAGE FOR BOOKMARKING ONLY ---
                 if message.id > highest_id_seen:
                     highest_id_seen = message.id
 
+                # --- METRICS ---
                 views = message.views or 0
+                forwards = message.forwards or 0
 
-                # --- Reactions (paginated for accuracy) ---
                 reactions = 0
-                offset_rate = 0
-                while True:
-                    try:
-                        resp = await self.client.invoke(
-                            GetMessageReactionsList(
-                                peer=InputPeerChannel(channel_id, chat.access_hash),
-                                id=message.id,
-                                limit=100,
-                                offset_rate=offset_rate
-                            )
-                        )
-                        if not getattr(resp, "reactions", None):
-                            break
-                        reactions += sum(r.count for r in resp.reactions)
-                        offset_rate = getattr(resp.reactions[-1], "rate", 0)
-                        if len(resp.reactions) < 100:
-                            break
-                    except Exception:
-                        break
+                if message.reactions and message.reactions.reactions:
+                    reactions = sum(r.count for r in message.reactions.reactions)
 
-                # --- Replies ---
-                replies = getattr(message, "replies", None)
-                replies = getattr(replies, "total", 0) if replies else 0
+                replies = 0
+                try:
+                    replies = await self.client.get_discussion_replies_count(
+                        chat_id=channel_id,
+                        message_id=message.id
+                    )
+                except Exception:
+                    replies_obj = getattr(message, "replies", None)
+                    replies = getattr(replies_obj, "total_count", 0)
 
-                # --- Public forwards (paginated for accuracy) ---
-                forwards = 0
-                offset_id = 0
-                while True:
-                    try:
-                        resp = await self.client.invoke(
-                            GetMessagePublicForwards(
-                                channel=InputChannel(channel_id, chat.access_hash),
-                                msg_id=message.id,
-                                limit=100,
-                                offset_id=offset_id,
-                                offset_rate=0,
-                                offset_peer=None
-                            )
-                        )
-                        forwards += len(getattr(resp, "forwards", []))
-                        if len(getattr(resp, "forwards", [])) < 100:
-                            break
-                        offset_id += len(resp.forwards)
-                    except Exception:
-                        forwards = 1 if message.forward_from or message.forward_from_chat else 0
-                        break
-
-                # --- Buffer message --- 
+                # --- BUFFER MESSAGE ---
                 message_data: MessageData = {
                     "channel_id": channel_id,
                     "message_id": message.id,
@@ -162,10 +127,10 @@ class TelegramService:
                     "replies": replies,
                     "forwards": forwards
                 }
+
                 messages_buffer.append(message_data)
 
-
-                # --- Daily stats ---
+                # --- DAILY STATS BUFFER ---
                 if msg_date not in stats_buffer:
                     stats_buffer[msg_date] = DailyMetrics(
                         posts=0,
@@ -176,12 +141,11 @@ class TelegramService:
                     )
 
                 stats = stats_buffer[msg_date]
-                stats['posts'] += 1
-                stats['views'] += views
-                stats['reactions'] += reactions
-                stats['replies'] += replies
-                stats['forwards'] += forwards
-
+                stats["posts"] += 1
+                stats["views"] += views
+                stats["reactions"] += reactions
+                stats["replies"] += replies
+                stats["forwards"] += forwards
 
                 processed_count += 1
                 if processed_count % 10 == 0:
@@ -191,24 +155,25 @@ class TelegramService:
                         current_message_date=message.date
                     )
 
-                # --- Commit batches ---
+                # --- FLUSH DB BATCH ---
                 if len(messages_buffer) >= BATCH_SIZE:
                     repo.upsert_messages(messages_buffer)
-                   # repo.update_daily_stats(channel_id, stats_buffer)
                     repo.update_scrape_run(channel_id, highest_id_seen)
                     messages_buffer.clear()
 
             except FloodWait as e:
-                logger.warning(f"FloodWait detected: sleeping {e.value}s")
-                self._update_status(channel_identifier, status=f"paused (floodwait {e.value}s)")
+                logger.warning(f"FloodWait: sleeping {e.value}s")
+                self._update_status(channel_identifier, status=f"paused ({e.value}s)")
                 await asyncio.sleep(e.value)
                 self._update_status(channel_identifier, status="running")
+
             except Exception:
                 logger.exception(f"Error processing message {message.id}")
 
-        # --- Final commit ---
+        # --- FINAL FLUSH ---
         if messages_buffer:
             repo.upsert_messages(messages_buffer)
+
         repo.update_daily_stats(channel_id, stats_buffer)
         repo.update_scrape_run(channel_id, highest_id_seen)
 
@@ -218,6 +183,3 @@ class TelegramService:
             messages_processed=processed_count,
             current_message_date=None
         )
-
-    def get_active_tasks(self) -> Dict:
-        return SCRAPE_STATUS
