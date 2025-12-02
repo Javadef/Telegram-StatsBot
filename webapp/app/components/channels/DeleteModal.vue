@@ -6,9 +6,18 @@ withDefaults(defineProps<{
 })
 
 const open = ref(false)
+const toast = useToast()
 
 async function onSubmit() {
+  // TODO: Implement actual delete functionality via API
   await new Promise(resolve => setTimeout(resolve, 1000))
+  
+  toast.add({
+    title: 'Channels Deleted',
+    description: `${count} channel(s) deleted successfully`,
+    color: 'success'
+  })
+  
   open.value = false
 }
 </script>
@@ -16,8 +25,8 @@ async function onSubmit() {
 <template>
   <UModal
     v-model:open="open"
-    :title="`Delete ${count} customer${count > 1 ? 's' : ''}`"
-    :description="`Are you sure, this action cannot be undone.`"
+    :title="`Delete ${count} channel${count > 1 ? 's' : ''}`"
+    :description="`Are you sure? This action cannot be undone.`"
   >
     <slot />
 

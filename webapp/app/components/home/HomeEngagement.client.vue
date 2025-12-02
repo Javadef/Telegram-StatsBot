@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { format, parseISO } from 'date-fns'
-import { VisXYContainer, VisLine, VisAxis, VisArea, VisCrosshair, VisTooltip } from '@unovis/vue'
+import { VisXYContainer, VisLine, VisAxis, VisArea, VisCrosshair, VisTooltip, VisGroupedBar } from '@unovis/vue'
 import type { Range } from '~/types'
 import type { Channel } from '~/types/telegram'
 
@@ -13,8 +13,9 @@ const props = defineProps<{
 
 type DataRecord = {
   date: Date
-  views: number
-  posts: number
+  reactions: number
+  replies: number
+  forwards: number
 }
 
 const { width } = useElementSize(cardRef)
@@ -23,17 +24,20 @@ const { t } = useI18n()
 
 const data = ref<DataRecord[]>([])
 
-const loadChartData = async () => {
+const loadEngagementData = async () => {
   const startDate = props.range.start.toISOString().split('T')[0]
   const endDate = props.range.end.toISOString().split('T')[0]
+  
+  if (!props.channel.channel_id) return
   
   const analytics = await fetchAnalytics(props.channel.channel_id, startDate, endDate)
   
   if (analytics && analytics.daily_breakdown) {
     data.value = analytics.daily_breakdown.map(day => ({
       date: parseISO(day.date),
-      views: day.views,
-      posts: day.posts
+      reactions: day.reactions,
+      replies: day.replies,
+      forwards: day.forwards
     }))
   } else {
     data.value = []
@@ -42,15 +46,15 @@ const loadChartData = async () => {
 
 watch(
   [() => props.channel.id, () => props.range.start.getTime(), () => props.range.end.getTime()],
-  loadChartData,
+  loadEngagementData,
   { immediate: true }
 )
 
 const x = (_: DataRecord, i: number) => i
-const y = (d: DataRecord) => d.views
 
-const totalViews = computed(() => data.value.reduce((acc: number, { views }) => acc + views, 0))
-const totalPosts = computed(() => data.value.reduce((acc: number, { posts }) => acc + posts, 0))
+const totalReactions = computed(() => data.value.reduce((acc: number, { reactions }) => acc + reactions, 0))
+const totalReplies = computed(() => data.value.reduce((acc: number, { replies }) => acc + replies, 0))
+const totalForwards = computed(() => data.value.reduce((acc: number, { forwards }) => acc + forwards, 0))
 
 const formatNumber = (num: number) => new Intl.NumberFormat('en').format(num)
 
@@ -66,25 +70,32 @@ const xTicks = (i: number) => {
   return formatDate(data.value[i].date)
 }
 
-const template = (d: DataRecord) => `${formatDate(d.date)}: ${formatNumber(d.views)} views, ${d.posts} posts`
+const template = (d: DataRecord) => `${formatDate(d.date)}: ${d.reactions} reactions, ${d.replies} replies, ${d.forwards} forwards`
 </script>
 
 <template>
   <UCard ref="cardRef" :ui="{ root: 'overflow-visible', body: '!px-0 !pt-0 !pb-3' }">
     <template #header>
       <div class="space-y-2">
-        <div>
-          <p class="text-xs text-muted uppercase mb-1.5">
-            {{ t('totalViews') }}
-          </p>
-          <p class="text-3xl text-highlighted font-semibold">
-            {{ formatNumber(totalViews) }}
-          </p>
-        </div>
-        <div>
-          <p class="text-xs text-dimmed">
-            {{ formatNumber(totalPosts) }} {{ t('postsInPeriod') }}
-          </p>
+        <p class="text-xs text-muted uppercase mb-1.5">
+          {{ t('engagementMetrics') }}
+        </p>
+        <div class="flex flex-wrap gap-4 text-sm">
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-blue-500" />
+            <span class="text-muted">{{ t('reactions') }}:</span>
+            <span class="font-semibold text-highlighted">{{ formatNumber(totalReactions) }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-green-500" />
+            <span class="text-muted">{{ t('replies') }}:</span>
+            <span class="font-semibold text-highlighted">{{ formatNumber(totalReplies) }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-purple-500" />
+            <span class="text-muted">{{ t('forwards') }}:</span>
+            <span class="font-semibold text-highlighted">{{ formatNumber(totalForwards) }}</span>
+          </div>
         </div>
       </div>
     </template>
@@ -92,19 +103,13 @@ const template = (d: DataRecord) => `${formatDate(d.date)}: ${formatNumber(d.vie
     <VisXYContainer
       :data="data"
       :padding="{ top: 40 }"
-      class="h-96"
+      class="h-80"
       :width="width"
     >
-      <VisLine
+      <VisGroupedBar
         :x="x"
-        :y="y"
-        color="var(--ui-primary)"
-      />
-      <VisArea
-        :x="x"
-        :y="y"
-        color="var(--ui-primary)"
-        :opacity="0.1"
+        :y="[(d: DataRecord) => d.reactions, (d: DataRecord) => d.replies, (d: DataRecord) => d.forwards]"
+        :color="['rgb(59, 130, 246)', 'rgb(34, 197, 94)', 'rgb(168, 85, 247)']"
       />
 
       <VisAxis
@@ -114,7 +119,6 @@ const template = (d: DataRecord) => `${formatDate(d.date)}: ${formatNumber(d.vie
       />
 
       <VisCrosshair
-        color="var(--ui-primary)"
         :template="template"
       />
 

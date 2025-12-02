@@ -2,11 +2,20 @@
 import { DateFormatter, getLocalTimeZone, CalendarDate, today } from '@internationalized/date'
 import type { Range } from '~/types'
 
+const { t } = useI18n()
+
 const df = new DateFormatter('en-US', {
   dateStyle: 'medium'
 })
 
 const selected = defineModel<Range>({ required: true })
+const isOpen = ref(false)
+
+// Temporary range for calendar selection
+const tempRange = ref<Range>({
+  start: selected.value.start,
+  end: selected.value.end
+})
 
 const ranges = [
   { label: 'Last 7 days', days: 7 },
@@ -27,11 +36,11 @@ const toCalendarDate = (date: Date) => {
 
 const calendarRange = computed({
   get: () => ({
-    start: selected.value.start ? toCalendarDate(selected.value.start) : undefined,
-    end: selected.value.end ? toCalendarDate(selected.value.end) : undefined
+    start: tempRange.value.start ? toCalendarDate(tempRange.value.start) : undefined,
+    end: tempRange.value.end ? toCalendarDate(tempRange.value.end) : undefined
   }),
   set: (newValue: { start: CalendarDate | null, end: CalendarDate | null }) => {
-    selected.value = {
+    tempRange.value = {
       start: newValue.start ? newValue.start.toDate(getLocalTimeZone()) : new Date(),
       end: newValue.end ? newValue.end.toDate(getLocalTimeZone()) : new Date()
     }
@@ -41,51 +50,94 @@ const calendarRange = computed({
 const isRangeSelected = (range: { days?: number, months?: number, years?: number }) => {
   if (!selected.value.start || !selected.value.end) return false
 
-  const currentDate = today(getLocalTimeZone())
-  let startDate = currentDate.copy()
+  const end = new Date()
+  const start = new Date()
 
   if (range.days) {
-    startDate = startDate.subtract({ days: range.days })
+    start.setDate(start.getDate() - range.days)
   } else if (range.months) {
-    startDate = startDate.subtract({ months: range.months })
+    start.setMonth(start.getMonth() - range.months)
   } else if (range.years) {
-    startDate = startDate.subtract({ years: range.years })
+    start.setFullYear(start.getFullYear() - range.years)
   }
 
-  const selectedStart = toCalendarDate(selected.value.start)
-  const selectedEnd = toCalendarDate(selected.value.end)
+  start.setHours(0, 0, 0, 0)
+  end.setHours(23, 59, 59, 999)
 
-  return selectedStart.compare(startDate) === 0 && selectedEnd.compare(currentDate) === 0
+  // Compare dates by day
+  const selectedStart = new Date(selected.value.start)
+  const selectedEnd = new Date(selected.value.end)
+  selectedStart.setHours(0, 0, 0, 0)
+  selectedEnd.setHours(0, 0, 0, 0)
+  
+  return selectedStart.getTime() === start.getTime() && selectedEnd.getTime() === end.getTime()
 }
 
 const selectRange = (range: { days?: number, months?: number, years?: number }) => {
-  const endDate = today(getLocalTimeZone())
-  let startDate = endDate.copy()
+  // Use regular JavaScript Date instead of @internationalized/date
+  const end = new Date()
+  const start = new Date()
 
   if (range.days) {
-    startDate = startDate.subtract({ days: range.days })
+    start.setDate(start.getDate() - range.days)
   } else if (range.months) {
-    startDate = startDate.subtract({ months: range.months })
+    start.setMonth(start.getMonth() - range.months)
   } else if (range.years) {
-    startDate = startDate.subtract({ years: range.years })
+    start.setFullYear(start.getFullYear() - range.years)
   }
 
+  // Reset time to start of day for consistent comparisons
+  start.setHours(0, 0, 0, 0)
+  end.setHours(23, 59, 59, 999)
+
+  // Create new Date objects to force reactivity
   selected.value = {
-    start: startDate.toDate(getLocalTimeZone()),
-    end: endDate.toDate(getLocalTimeZone())
+    start: new Date(start.getTime()),
+    end: new Date(end.getTime())
   }
+  
+  // Update temp range as well
+  tempRange.value = {
+    start: new Date(start.getTime()),
+    end: new Date(end.getTime())
+  }
+  
+  // Close popover
+  isOpen.value = false
 }
+
+const applyRange = () => {
+  // Create new Date objects to force reactivity
+  selected.value = {
+    start: new Date(tempRange.value.start.getTime()),
+    end: new Date(tempRange.value.end.getTime())
+  }
+  isOpen.value = false
+}
+
+const cancelRange = () => {
+  tempRange.value = { ...selected.value }
+  isOpen.value = false
+}
+
+// Sync temp range when popover opens
+watch(isOpen, (newValue) => {
+  if (newValue) {
+    tempRange.value = { ...selected.value }
+  }
+})
 </script>
 
 <template>
-  <UPopover :content="{ align: 'start' }" :modal="true">
+  <UPopover v-model:open="isOpen" :content="{ align: 'start', sideOffset: 8 }" :modal="true">
     <UButton
       color="neutral"
       variant="ghost"
       icon="i-lucide-calendar"
       class="data-[state=open]:bg-elevated group"
+      size="sm"
     >
-      <span class="truncate">
+      <span class="truncate text-sm">
         <template v-if="selected.start">
           <template v-if="selected.end">
             {{ df.format(selected.start) }} - {{ df.format(selected.end) }}
@@ -95,37 +147,57 @@ const selectRange = (range: { days?: number, months?: number, years?: number }) 
           </template>
         </template>
         <template v-else>
-          Pick a date
+          {{ t('pickDate') }}
         </template>
       </span>
 
       <template #trailing>
-        <UIcon name="i-lucide-chevron-down" class="shrink-0 text-dimmed size-5 group-data-[state=open]:rotate-180 transition-transform duration-200" />
+        <UIcon name="i-lucide-chevron-down" class="shrink-0 text-dimmed size-4 group-data-[state=open]:rotate-180 transition-transform duration-200" />
       </template>
     </UButton>
 
     <template #content>
-      <div class="flex items-stretch sm:divide-x divide-default">
-        <div class="hidden sm:flex flex-col justify-center">
-          <UButton
-            v-for="(range, index) in ranges"
-            :key="index"
-            :label="range.label"
-            color="neutral"
-            variant="ghost"
-            class="rounded-none px-4"
-            :class="[isRangeSelected(range) ? 'bg-elevated' : 'hover:bg-elevated/50']"
-            truncate
-            @click="selectRange(range)"
+      <div class="flex flex-col max-w-full">
+        <div class="flex flex-col sm:flex-row items-stretch sm:divide-x divide-default">
+          <div class="flex sm:flex-col overflow-x-auto sm:overflow-visible p-2 sm:p-0 gap-1 sm:gap-0">
+            <UButton
+              v-for="(range, index) in ranges"
+              :key="index"
+              :label="range.label"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              class="rounded-md sm:rounded-none px-3 py-1.5 whitespace-nowrap"
+              :class="[isRangeSelected(range) ? 'bg-elevated' : 'hover:bg-elevated/50']"
+              @click="selectRange(range)"
+            />
+          </div>
+
+          <UCalendar
+            v-model="calendarRange"
+            class="p-2"
+            :number-of-months="1"
+            range
           />
         </div>
-
-        <UCalendar
-          v-model="calendarRange"
-          class="p-2"
-          :number-of-months="2"
-          range
-        />
+        
+        <!-- Action Buttons -->
+        <div class="flex justify-end gap-2 p-3 border-t border-default">
+          <UButton
+            :label="t('cancel')"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            @click="cancelRange"
+          />
+          <UButton
+            :label="t('apply')"
+            color="primary"
+            variant="solid"
+            size="sm"
+            @click="applyRange"
+          />
+        </div>
       </div>
     </template>
   </UPopover>

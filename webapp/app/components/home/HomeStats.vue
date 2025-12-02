@@ -1,66 +1,67 @@
 <script setup lang="ts">
-import type { Period, Range, Stat } from '~/types'
+import type { Range, Stat } from '~/types'
+import type { Channel } from '~/types/telegram'
 
 const props = defineProps<{
-  period: Period
+  channel: Channel
   range: Range
 }>()
 
-function formatCurrency(value: number): string {
-  return value.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0
-  })
+const { t } = useI18n()
+const { fetchAnalytics } = useTelegramAPI()
+
+const formatNumber = (value: number): string => {
+  return value.toLocaleString('en-US')
 }
 
-const baseStats = [{
-  title: 'Channels',
-  icon: 'i-lucide-users',
-  minValue: 400,
-  maxValue: 1000,
-  minVariation: -15,
-  maxVariation: 25
-}, {
-  title: 'Conversions',
-  icon: 'i-lucide-chart-pie',
-  minValue: 1000,
-  maxValue: 2000,
-  minVariation: -10,
-  maxVariation: 20
-}, {
-  title: 'Revenue',
-  icon: 'i-lucide-circle-dollar-sign',
-  minValue: 200000,
-  maxValue: 500000,
-  minVariation: -20,
-  maxVariation: 30,
-  formatter: formatCurrency
-}, {
-  title: 'Orders',
-  icon: 'i-lucide-shopping-cart',
-  minValue: 100,
-  maxValue: 300,
-  minVariation: -5,
-  maxVariation: 15
-}]
+const stats = ref<Stat[]>([])
 
-const { data: stats } = await useAsyncData<Stat[]>('stats', async () => {
-  return baseStats.map((stat) => {
-    const value = randomInt(stat.minValue, stat.maxValue)
-    const variation = randomInt(stat.minVariation, stat.maxVariation)
-
-    return {
-      title: stat.title,
-      icon: stat.icon,
-      value: stat.formatter ? stat.formatter(value) : value,
-      variation
+const loadStats = async () => {
+  const startDate = props.range.start.toISOString().split('T')[0]
+  const endDate = props.range.end.toISOString().split('T')[0]
+  
+  const analytics = await fetchAnalytics(props.channel.channel_id, startDate, endDate)
+  
+  if (!analytics || analytics.total_posts === 0) {
+    stats.value = [
+      { title: t('subscribers'), icon: 'i-lucide-users', value: formatNumber(props.channel.subscriber_count || 0) },
+      { title: t('totalPosts'), icon: 'i-lucide-file-text', value: '0' },
+      { title: t('totalViews'), icon: 'i-lucide-eye', value: '0' },
+      { title: t('avgViewsPerPost'), icon: 'i-lucide-trending-up', value: '0' }
+    ]
+    return
+  }
+  
+  const avgViewsPerPost = analytics.total_posts > 0 
+    ? Math.round(analytics.total_views / analytics.total_posts)
+    : 0
+  
+  stats.value = [
+    {
+      title: t('subscribers'),
+      icon: 'i-lucide-users',
+      value: formatNumber(props.channel.subscriber_count || 0)
+    },
+    {
+      title: t('totalPosts'),
+      icon: 'i-lucide-file-text',
+      value: formatNumber(analytics.total_posts)
+    },
+    {
+      title: t('totalViews'),
+      icon: 'i-lucide-eye',
+      value: formatNumber(analytics.total_views)
+    },
+    {
+      title: t('avgViewsPerPost'),
+      icon: 'i-lucide-trending-up',
+      value: formatNumber(avgViewsPerPost)
     }
-  })
-}, {
-  watch: [() => props.period, () => props.range],
-  default: () => []
-})
+  ]
+}
+
+// Watch for changes
+watch([() => props.channel.id, () => props.range.start.getTime(), () => props.range.end.getTime()], loadStats, { immediate: true })
 </script>
 
 <template>
@@ -84,14 +85,6 @@ const { data: stats } = await useAsyncData<Stat[]>('stats', async () => {
         <span class="text-2xl font-semibold text-highlighted">
           {{ stat.value }}
         </span>
-
-        <UBadge
-          :color="stat.variation > 0 ? 'success' : 'error'"
-          variant="subtle"
-          class="text-xs"
-        >
-          {{ stat.variation > 0 ? '+' : '' }}{{ stat.variation }}%
-        </UBadge>
       </div>
     </UPageCard>
   </UPageGrid>
