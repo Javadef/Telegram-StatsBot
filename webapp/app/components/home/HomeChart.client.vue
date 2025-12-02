@@ -24,14 +24,16 @@ const { t } = useI18n()
 const data = ref<DataRecord[]>([])
 
 const loadChartData = async () => {
-  const startDate = props.range.start.toISOString().split('T')[0]
-  const endDate = props.range.end.toISOString().split('T')[0]
+  const { formatDateForAPI } = await import('~/utils')
+  const startDate = formatDateForAPI(props.range.start)
+  const endDate = formatDateForAPI(props.range.end)
   
   const analytics = await fetchAnalytics(props.channel.channel_id, startDate, endDate)
   
   if (analytics && analytics.daily_breakdown) {
+    // Parse dates correctly - they come from backend in Tashkent timezone
     data.value = analytics.daily_breakdown.map(day => ({
-      date: parseISO(day.date),
+      date: parseISO(day.date), // This is just the date (YYYY-MM-DD), no timezone issues
       views: day.views,
       posts: day.posts
     }))

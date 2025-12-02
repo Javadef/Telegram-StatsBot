@@ -3,7 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
 import telegram_client 
+import datetime
 from typing import Optional
 from pyrogram import Client
 
@@ -15,6 +17,11 @@ from api import router
 load_dotenv()
 
 # --- CONFIG & SETUP ---
+
+# --- TIMEZONE CONFIGURATION ---
+TIMEZONE = ZoneInfo("Asia/Tashkent")  # UTC+5
+logger = logging.getLogger(__name__)
+logger.info(f"Application timezone set to: Asia/Tashkent (UTC+5)")
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

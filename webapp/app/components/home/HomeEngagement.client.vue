@@ -25,8 +25,9 @@ const { t } = useI18n()
 const data = ref<DataRecord[]>([])
 
 const loadEngagementData = async () => {
-  const startDate = props.range.start.toISOString().split('T')[0]
-  const endDate = props.range.end.toISOString().split('T')[0]
+  const { formatDateForAPI } = await import('~/utils')
+  const startDate = formatDateForAPI(props.range.start)
+  const endDate = formatDateForAPI(props.range.end)
   
   if (!props.channel.channel_id) return
   
