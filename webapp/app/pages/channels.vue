@@ -2,7 +2,8 @@
 import type { Channel } from '~/types/telegram'
 
 const { t } = useI18n()
-const { fetchChannels } = useTelegramAPI()
+const { fetchChannels, deleteChannel } = useTelegramAPI()
+const toast = useToast()
 
 // Fetch channels
 const { data: channels, status, refresh } = await useFetch<Channel[]>('/api/channels', {
@@ -20,6 +21,35 @@ const detailsModalOpen = ref(false)
 const viewDetails = (channel: Channel) => {
   selectedChannel.value = channel
   detailsModalOpen.value = true
+}
+
+// Delete functionality
+const deletingChannelId = ref<number | null>(null)
+const deletePopoverOpen = ref<Record<number, boolean>>({})
+
+const handleDelete = async (channel: Channel) => {
+  deletingChannelId.value = channel.id!
+  const success = await deleteChannel(channel.id!)
+  deletingChannelId.value = null
+  
+  if (success) {
+    deletePopoverOpen.value[channel.id!] = false
+    toast.add({
+      title: 'Kanal o\'chirildi',
+      description: `${channel.title} muvaffaqiyatli o'chirildi`,
+      color: 'success'
+    })
+    // Remove from list
+    if (channels.value) {
+      channels.value = channels.value.filter(c => c.id !== channel.id)
+    }
+  } else {
+    toast.add({
+      title: 'Xatolik',
+      description: 'Kanalni o\'chirishda xatolik yuz berdi',
+      color: 'error'
+    })
+  }
 }
 
 // Filtered channels
@@ -163,6 +193,40 @@ const getStatusColor = (type: string | undefined) => {
                 square
                 @click.stop="() => navigateTo(`https://t.me/${channel.username}`, { external: true, open: { target: '_blank' } })"
               />
+              <div @click.stop class="inline-flex">
+                <UPopover v-model:open="deletePopoverOpen[channel.id!]" :popper="{ placement: 'top' }">
+                  <div class="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 cursor-pointer transition-colors flex items-center justify-center">
+                    <UIcon v-if="deletingChannelId === channel.id" name="i-lucide-loader-2" class="w-4 h-4 animate-spin" />
+                    <UIcon v-else name="i-lucide-trash-2" class="w-4 h-4" />
+                  </div>
+                  <template #content>
+                    <div class="p-3 space-y-3 w-64">
+                      <p class="text-sm font-medium">O'chirish?</p>
+                      <p class="text-xs text-gray-600 dark:text-gray-400">
+                        {{ channel.title }} va barcha ma'lumotlarni o'chirmoqchimisiz?
+                      </p>
+                      <div class="flex gap-2">
+                        <UButton
+                          label="Bekor qilish"
+                          color="neutral"
+                          variant="ghost"
+                          size="xs"
+                          block
+                          @click="deletePopoverOpen[channel.id!] = false"
+                        />
+                        <UButton
+                          label="O'chirish"
+                          color="error"
+                          size="xs"
+                          block
+                          :loading="deletingChannelId === channel.id"
+                          @click="handleDelete(channel)"
+                        />
+                      </div>
+                    </div>
+                  </template>
+                </UPopover>
+              </div>
             </div>
           </div>
         </UCard>

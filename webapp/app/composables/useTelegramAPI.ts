@@ -2,7 +2,8 @@ import type { Channel, Message, AnalyticsResponse, ScrapeRequest, ScrapeStatusRe
 
 export const useTelegramAPI = () => {
   const config = useRuntimeConfig()
-  const apiBase = config.public.apiBase || 'http://localhost:8000'
+  // Use localhost for client-side (browser) requests
+  const apiBase = import.meta.client ? 'http://localhost:8000' : (config.public.apiBase || 'http://localhost:8000')
 
   // Fetch all channels
   const fetchChannels = async (): Promise<Channel[]> => {
@@ -96,6 +97,19 @@ export const useTelegramAPI = () => {
     return data.value || null
   }
 
+  // Delete a channel
+  const deleteChannel = async (channelId: number): Promise<boolean> => {
+    try {
+      await $fetch(`${apiBase}/api/channels/${channelId}`, {
+        method: 'DELETE'
+      })
+      return true
+    } catch (err) {
+      console.error(`Failed to delete channel ${channelId}:`, err)
+      return false
+    }
+  }
+
   return {
     fetchChannels,
     fetchChannel,
@@ -103,6 +117,7 @@ export const useTelegramAPI = () => {
     fetchMessages,
     startScrape,
     fetchScrapeStatuses,
-    fetchScrapeStatus
+    fetchScrapeStatus,
+    deleteChannel
   }
 }

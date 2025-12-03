@@ -1,9 +1,12 @@
 from typing import List, Optional, Dict
 from datetime import date, datetime
-from sqlmodel import Session, select, func, col
+from sqlmodel import Session, select, func, col, delete
 from sqlalchemy import asc
 from models import Channel, Message, ChannelStatsDaily, ScrapeRun
-from models import ChannelData, MessageData, DailyMetrics 
+from models import ChannelData, MessageData, DailyMetrics
+import logging
+
+logger = logging.getLogger(__name__) 
 
 class TelegramRepository:
     def __init__(self, session: Session):
@@ -210,3 +213,26 @@ class TelegramRepository:
             .offset(offset)\
             .limit(limit)
         return self.session.exec(query).all()
+    
+    def delete_channel(self, channel_id: int) -> bool:
+        """
+        Delete a channel and all its messages.
+        """
+        try:
+            # Get the channel first
+            channel = self.session.get(Channel, channel_id)
+            if not channel:
+                return False
+            
+            # Delete all messages for this channel
+            stmt = delete(Message).where(Message.channel_id == channel.channel_id)
+            self.session.exec(stmt)
+            
+            # Delete the channel
+            self.session.delete(channel)
+            self.session.commit()
+            return True
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Failed to delete channel {channel_id}: {e}")
+            return False

@@ -171,3 +171,22 @@ def get_channel_messages(
          raise HTTPException(status_code=404, detail="No messages found for this channel.")
          
     return messages
+
+@router.delete("/api/channels/{channel_id}")
+def delete_channel(
+    channel_id: int,
+    repo: TelegramRepository = Depends(get_repository)
+):
+    """
+    Delete a channel and all its messages from the database.
+    """
+    channel = repo.get_channel_by_id(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    
+    # Delete channel (cascade should handle messages)
+    success = repo.delete_channel(channel_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete channel")
+    
+    return {"message": "Channel deleted successfully", "channel_id": channel_id}

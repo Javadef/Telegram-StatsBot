@@ -3,7 +3,6 @@ services:
   database:
     image: postgres:15-alpine
     container_name: telegram-stats-db
-    restart: unless-stopped
     environment:
       POSTGRES_DB: telegram_stats
       POSTGRES_USER: postgres
@@ -26,7 +25,6 @@ services:
       context: ./bot
       dockerfile: Dockerfile
     container_name: telegram-stats-backend
-    restart: unless-stopped
     environment:
       # Telegram API credentials
       API_ID: ${API_ID}
@@ -58,7 +56,6 @@ services:
       context: ./webapp
       dockerfile: Dockerfile
     container_name: telegram-stats-frontend
-    restart: unless-stopped
     environment:
       NUXT_PUBLIC_API_BASE: http://backend:8000
     ports:

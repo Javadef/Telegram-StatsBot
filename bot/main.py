@@ -2,6 +2,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 import telegram_client 
@@ -58,10 +59,17 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     
     # Create the client instance and assign it to the module-level variable
-    # Use sessions/ directory for Docker volume compatibility
-    session_name = os.getenv("TELEGRAM_SESSION_PATH", "telegram_scraper_session")
+    # Use sessions/ directory for Docker, current directory for local
+    session_path = os.getenv("TELEGRAM_SESSION_PATH")
+    if session_path is None:
+        # Check if we're in Docker (sessions/ exists) or local
+        if os.path.exists("sessions"):
+            session_path = "sessions/telegram_scraper_session"
+        else:
+            session_path = "telegram_scraper_session"
+    
     telegram_client.pyrogram_client = Client(
-        session_name,
+        session_path,
         api_id=API_ID,
         api_hash=API_HASH,
     #   bot_token=BOT_TOKEN if BOT_TOKEN else None,
@@ -100,6 +108,15 @@ async def lifespan(app: FastAPI):
 
 # --- APP ---
 app = FastAPI(title="Telegram Scraper Service", version="3.0.0", lifespan=lifespan)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Register API Routes from api.py
 app.include_router(router)
