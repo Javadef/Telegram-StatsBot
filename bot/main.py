@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 try:
     API_ID = int(os.getenv('API_ID'))
     API_HASH = os.getenv('API_HASH')
-#    BOT_TOKEN = os.getenv('BOT_TOKEN')
+#   BOT_TOKEN = os.getenv('BOT_TOKEN')
 except (TypeError, ValueError):
     logger.error("FATAL: API_ID, API_HASH, or BOT_TOKEN is missing or invalid in the .env file.")
     # Raise exception to halt execution if critical credentials are missing
@@ -58,8 +58,10 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     
     # Create the client instance and assign it to the module-level variable
+    # Use sessions/ directory for Docker volume compatibility
+    session_name = os.getenv("TELEGRAM_SESSION_PATH", "telegram_scraper_session")
     telegram_client.pyrogram_client = Client(
-        "telegram_scraper_session",
+        session_name,
         api_id=API_ID,
         api_hash=API_HASH,
     #   bot_token=BOT_TOKEN if BOT_TOKEN else None,
