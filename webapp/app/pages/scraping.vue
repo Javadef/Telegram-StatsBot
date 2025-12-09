@@ -8,14 +8,20 @@ const { data: statuses, refresh } = await useFetch<ScrapeStatusResponse[]>('/api
   lazy: true
 })
 
-// Auto-refresh every 5 seconds
-const intervalId = setInterval(() => {
-  refresh()
-}, 5000)
+// Auto-refresh every 5 seconds (client-side only)
+let intervalId: NodeJS.Timeout | null = null
+
+onMounted(() => {
+  intervalId = setInterval(() => {
+    refresh()
+  }, 5000)
+})
 
 // Cleanup on unmount
 onUnmounted(() => {
-  clearInterval(intervalId)
+  if (intervalId) {
+    clearInterval(intervalId)
+  }
 })
 
 // Status color mapping

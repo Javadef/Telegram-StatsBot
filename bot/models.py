@@ -25,6 +25,7 @@ class MessageData(TypedDict):
     reactions: int
     replies: int
     forwards: int
+    media_group_id: Optional[str]
     # Add other fields as needed
 
 class DailyMetrics(TypedDict):
@@ -63,6 +64,7 @@ class Message(SQLModel, table=True):
     message_id: int = Field(sa_type=BigInteger, nullable=False, index=True)
 
     date: datetime = Field(nullable=False)
+    media_group_id: Optional[str] = Field(default=None, index=True)  # For album/grouped media
 
     views: int = Field(default=0)
     reactions: int = Field(default=0)

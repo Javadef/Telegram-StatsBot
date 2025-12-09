@@ -190,3 +190,49 @@ def delete_channel(
         raise HTTPException(status_code=500, detail="Failed to delete channel")
     
     return {"message": "Channel deleted successfully", "channel_id": channel_id}
+
+@router.get("/api/debug/duplicates/{channel_id}")
+def check_duplicates(
+    channel_id: int,
+    repo: TelegramRepository = Depends(get_repository)
+):
+    """
+    Debug endpoint to check for duplicate messages.
+    """
+    from sqlalchemy import func, select
+    from models import Message
+    
+    # Find duplicates by (channel_id, message_id)
+    query = select(
+        Message.channel_id,
+        Message.message_id,
+        func.count(Message.id).label("count")
+    ).where(
+        Message.channel_id == channel_id
+    ).group_by(
+        Message.channel_id,
+        Message.message_id
+    ).having(
+        func.count(Message.id) > 1
+    )
+    
+    duplicates = repo.session.exec(query).all()
+    
+    # Also get total message count
+    total_query = select(func.count(Message.id)).where(Message.channel_id == channel_id)
+    total_count = repo.session.exec(total_query).first()
+    
+    # Get distinct message count
+    distinct_query = select(func.count(func.distinct(Message.message_id))).where(Message.channel_id == channel_id)
+    distinct_count = repo.session.exec(distinct_query).first()
+    
+    return {
+        "channel_id": channel_id,
+        "total_rows": total_count,
+        "distinct_messages": distinct_count,
+        "duplicates_found": len(duplicates),
+        "duplicate_details": [
+            {"channel_id": d[0], "message_id": d[1], "count": d[2]} 
+            for d in duplicates
+        ]
+    }

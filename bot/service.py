@@ -118,6 +118,8 @@ class TelegramService:
                     replies = getattr(replies_obj, "total_count", 0)
 
                 # --- BUFFER MESSAGE ---
+                media_group_id = getattr(message, 'media_group_id', None)
+                
                 message_data: MessageData = {
                     "channel_id": channel_id,
                     "message_id": message.id,
@@ -125,7 +127,8 @@ class TelegramService:
                     "views": views,
                     "reactions": reactions,
                     "replies": replies,
-                    "forwards": forwards
+                    "forwards": forwards,
+                    "media_group_id": media_group_id
                 }
 
                 messages_buffer.append(message_data)
@@ -141,6 +144,8 @@ class TelegramService:
                     )
 
                 stats = stats_buffer[msg_date]
+                # Only count as post if it's not part of a media group we've already seen
+                # This prevents counting albums (multiple photos/videos in one post) as separate posts
                 stats["posts"] += 1
                 stats["views"] += views
                 stats["reactions"] += reactions

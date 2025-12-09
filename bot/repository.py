@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict
 from datetime import date, datetime
 from sqlmodel import Session, select, func, col, delete
-from sqlalchemy import asc
+from sqlalchemy import asc, String
 from models import Channel, Message, ChannelStatsDaily, ScrapeRun
 from models import ChannelData, MessageData, DailyMetrics
 import logging
@@ -48,7 +48,8 @@ class TelegramRepository:
                 "reactions": stmt.excluded.reactions,
                 "replies": stmt.excluded.replies,
                 "forwards": stmt.excluded.forwards,
-                "date": stmt.excluded.date 
+                "date": stmt.excluded.date,
+                "media_group_id": stmt.excluded.media_group_id
             }
             
             stmt = stmt.on_conflict_do_update(
@@ -84,6 +85,7 @@ class TelegramRepository:
                         existing.reactions = msg_data['reactions']
                         existing.replies = msg_data['replies']
                         existing.forwards = msg_data['forwards']
+                        existing.media_group_id = msg_data.get('media_group_id')
                         self.session.add(existing)
                     else:
                         # INSERT
@@ -99,9 +101,37 @@ class TelegramRepository:
                     start_of_day = datetime.combine(day, datetime.min.time())
                     end_of_day = datetime.combine(day, datetime.max.time())
 
-                    # Use coalesce to ensure DB returns 0 instead of None
-                    statement = select(
-                        func.count(Message.id).label("posts"),
+                    # Count posts correctly:
+                    # - Messages without media_group_id count as 1 post each
+                    # - Messages with same media_group_id count as 1 post total (album/grouped media)
+                    # Use a subquery to count distinct media groups + non-grouped messages
+                    
+                    # Subquery: Get one representative message per media_group_id
+                    from sqlalchemy import case, literal
+                    
+                    # Count logic:
+                    # 1. For messages WITH media_group_id: count distinct media_group_id
+                    # 2. For messages WITHOUT media_group_id: count each message
+                    distinct_posts_query = select(
+                        func.count(
+                            func.distinct(
+                                case(
+                                    (Message.media_group_id.is_not(None), Message.media_group_id),
+                                    else_=func.cast(Message.id, String)
+                                )
+                            )
+                        ).label("posts")
+                    ).where(
+                        Message.channel_id == channel_id,
+                        Message.date >= start_of_day,
+                        Message.date <= end_of_day
+                    )
+                    
+                    posts_result = self.session.exec(distinct_posts_query).first()
+                    posts = posts_result if posts_result else 0
+                    
+                    # Sum metrics (views, reactions, etc.) from all messages
+                    metrics_statement = select(
                         func.coalesce(func.sum(Message.views), 0).label("views"),
                         func.coalesce(func.sum(Message.reactions), 0).label("reactions"),
                         func.coalesce(func.sum(Message.replies), 0).label("replies"),
@@ -112,10 +142,8 @@ class TelegramRepository:
                         Message.date <= end_of_day
                     )
 
-                    result = self.session.exec(statement).first()
-                    
-                    # Unpack directly (safe because of coalesce)
-                    posts, views, reactions, replies, forwards = result
+                    metrics_result = self.session.exec(metrics_statement).first()
+                    views, reactions, replies, forwards = metrics_result
 
                     # Update Logic
                     daily_stat = self.session.exec(
