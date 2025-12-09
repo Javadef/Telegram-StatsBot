@@ -190,7 +190,8 @@ const getStatusColor = (type: string | undefined) => {
                 color="neutral"
                 variant="ghost"
                 size="xs"
-                squareateTo(`https://t.me/${channel.username}`, { external: true, open: { target: '_blank' } })"
+                square
+                @click.stop="navigateTo(`https://t.me/${channel.username}`, { external: true, open: { target: '_blank' } })"
               />
               <div @click.stop class="inline-flex">
                 <UPopover v-model:open="deletePopoverOpen[channel.id!]" :popper="{ placement: 'top' }">
