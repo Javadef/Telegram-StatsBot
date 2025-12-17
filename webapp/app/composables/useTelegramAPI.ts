@@ -1,13 +1,9 @@
 import type { Channel, Message, AnalyticsResponse, ScrapeRequest, ScrapeStatusResponse } from '~/types/telegram'
 
 export const useTelegramAPI = () => {
-  const config = useRuntimeConfig()
-  // Use localhost for client-side (browser) requests
-  const apiBase = import.meta.client ? 'http://localhost:8000' : (config.public.apiBase || 'http://localhost:8000')
-
   // Fetch all channels
   const fetchChannels = async (): Promise<Channel[]> => {
-    const { data, error } = await useFetch<Channel[]>(`${apiBase}/api/channels`)
+    const { data, error } = await useFetch<Channel[]>('/api/channels')
     if (error.value) {
       console.error('Failed to fetch channels:', error.value)
       throw error.value
@@ -17,7 +13,7 @@ export const useTelegramAPI = () => {
 
   // Fetch single channel by ID
   const fetchChannel = async (channelId: number): Promise<Channel | null> => {
-    const { data, error } = await useFetch<Channel>(`${apiBase}/api/channels/${channelId}`)
+    const { data, error } = await useFetch<Channel>(`/api/channels/${channelId}`)
     if (error.value) {
       console.error(`Failed to fetch channel ${channelId}:`, error.value)
       return null
@@ -52,7 +48,7 @@ export const useTelegramAPI = () => {
     limit: number = 100,
     offset: number = 0
   ): Promise<Message[]> => {
-    const { data, error } = await useFetch<Message[]>(`${apiBase}/api/messages/${channelId}`, {
+    const { data, error } = await useFetch<Message[]>(`/api/messages/${channelId}`, {
       params: { limit, offset }
     })
     if (error.value) {
@@ -64,7 +60,7 @@ export const useTelegramAPI = () => {
 
   // Start a scrape task
   const startScrape = async (request: ScrapeRequest): Promise<ScrapeStatusResponse | null> => {
-    const { data, error } = await useFetch<ScrapeStatusResponse>(`${apiBase}/api/scrape_channel`, {
+    const { data, error } = await useFetch<ScrapeStatusResponse>('/api/scrape', {
       method: 'POST',
       body: request
     })
@@ -77,7 +73,7 @@ export const useTelegramAPI = () => {
 
   // Get all scrape statuses
   const fetchScrapeStatuses = async (): Promise<ScrapeStatusResponse[]> => {
-    const { data, error } = await useFetch<ScrapeStatusResponse[]>(`${apiBase}/api/scrape_status`)
+    const { data, error } = await useFetch<ScrapeStatusResponse[]>('/api/scrape')
     if (error.value) {
       console.error('Failed to fetch scrape statuses:', error.value)
       return []
@@ -88,7 +84,7 @@ export const useTelegramAPI = () => {
   // Get scrape status for a specific channel
   const fetchScrapeStatus = async (channelIdentifier: string): Promise<ScrapeStatusResponse | null> => {
     const { data, error } = await useFetch<ScrapeStatusResponse>(
-      `${apiBase}/api/scrape_status/${channelIdentifier}`
+      `/api/scrape/${channelIdentifier}`
     )
     if (error.value) {
       console.error(`Failed to fetch scrape status for ${channelIdentifier}:`, error.value)
@@ -100,7 +96,7 @@ export const useTelegramAPI = () => {
   // Delete a channel
   const deleteChannel = async (channelId: number): Promise<boolean> => {
     try {
-      await $fetch(`${apiBase}/api/channels/${channelId}`, {
+      await $fetch(`/api/channels/${channelId}`, {
         method: 'DELETE'
       })
       return true

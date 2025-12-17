@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session
@@ -10,6 +11,28 @@ from service import TelegramService, SCRAPE_STATUS
 import telegram_client 
 
 logger = logging.getLogger(__name__)
+
+def normalize_channel_identifier(identifier: str) -> str:
+    """
+    Normalize channel identifier from various formats:
+    - https://t.me/channel_name -> channel_name
+    - t.me/channel_name -> channel_name  
+    - @channel_name -> channel_name
+    - channel_name -> channel_name
+    """
+    identifier = identifier.strip()
+    
+    # Remove https://t.me/ or http://t.me/ or t.me/
+    identifier = re.sub(r'^https?://t\.me/', '', identifier)
+    identifier = re.sub(r'^t\.me/', '', identifier)
+    
+    # Remove @ prefix
+    identifier = identifier.lstrip('@')
+    
+    # Remove trailing slashes
+    identifier = identifier.rstrip('/')
+    
+    return identifier
 
 router = APIRouter()
 
@@ -49,10 +72,12 @@ async def start_scrape(
     """
     Start a scraping task in the background.
     """
-    logger.info(f"Starting background scrape for channel: {request.channel_identifier}")
+    # Normalize the channel identifier
+    normalized_identifier = normalize_channel_identifier(request.channel_identifier)
+    logger.info(f"Starting background scrape for channel: {normalized_identifier} (original: {request.channel_identifier})")
     
     # Initialize status
-    service._update_status(request.channel_identifier, status="pending")
+    service._update_status(normalized_identifier, status="pending")
     
     # Default end_date to today if not provided
     end_dt = request.end_date if request.end_date else date.today()
@@ -60,13 +85,13 @@ async def start_scrape(
     # Add to background tasks
     background_tasks.add_task(
         service.scrape_channel_task,
-        request.channel_identifier,
+        normalized_identifier,
         request.start_date,
         end_dt
     )
     
     return {
-        "channel_identifier": request.channel_identifier,
+        "channel_identifier": normalized_identifier,
         "status": "pending",
         "messages_processed": 0
     }

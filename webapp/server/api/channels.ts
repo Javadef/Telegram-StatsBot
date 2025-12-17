@@ -1,6 +1,6 @@
 import type { Channel } from '~/types/telegram'
 
-export default defineEventHandler(async () => {
+export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const apiBase = config.public.apiBase || 'http://localhost:8000'
 

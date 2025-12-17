@@ -16,7 +16,7 @@ const isLoading = ref(false)
 async function onSubmit() {
   isLoading.value = true
   try {
-    await $fetch('http://localhost:8000/api/scrape_channel', {
+    await $fetch('/api/scrape', {
       method: 'POST',
       body: {
         channel_identifier: state.channel_identifier,
