@@ -2,7 +2,7 @@ import { translations, type Language, type TranslationKey } from '~/utils/i18n'
 
 export const useI18n = () => {
   const language = useCookie<Language>('language', {
-    default: () => 'en',
+    default: () => 'uz',
     watch: true
   })
 
