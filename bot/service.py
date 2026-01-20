@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import date
 from typing import Dict
+from zoneinfo import ZoneInfo
 from pyrogram import Client
 from pyrogram.errors import FloodWait
 from pyrogram.enums import ChatType
@@ -9,6 +10,9 @@ from pyrogram.enums import ChatType
 from models import ChannelData, MessageData, DailyMetrics
 from database import get_session
 from repository import TelegramRepository
+
+# Tashkent timezone (UTC+5)
+TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +90,10 @@ class TelegramService:
                 if not message.date:
                     continue
 
-                msg_date = message.date.date()
+                # Convert UTC datetime to Tashkent timezone before extracting date
+                # Pyrogram returns message.date in UTC
+                msg_datetime_tashkent = message.date.astimezone(TASHKENT_TZ)
+                msg_date = msg_datetime_tashkent.date()
 
                 # --- DATE BOUNDARY CONTROL ---
                 if msg_date > end_date:
@@ -123,7 +130,7 @@ class TelegramService:
                 message_data: MessageData = {
                     "channel_id": channel_id,
                     "message_id": message.id,
-                    "date": message.date,
+                    "date": msg_datetime_tashkent,  # Store in Tashkent timezone
                     "views": views,
                     "reactions": reactions,
                     "replies": replies,
@@ -157,7 +164,7 @@ class TelegramService:
                     self._update_status(
                         channel_identifier,
                         messages_processed=processed_count,
-                        current_message_date=message.date
+                        current_message_date=msg_datetime_tashkent  # Use Tashkent time
                     )
 
                 # --- FLUSH DB BATCH ---
